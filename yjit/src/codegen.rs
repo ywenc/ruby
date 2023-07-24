@@ -2863,6 +2863,7 @@ fn gen_opt_aref(
         return None;
     }
 
+    // "lazy basic block versioning"
     // Defer compilation so we can specialize base on a runtime receiver
     if !jit.at_current_insn() {
         defer_compilation(jit, asm, ocb);
@@ -2870,6 +2871,7 @@ fn gen_opt_aref(
     }
 
     // Specialize base on compile time values
+    // peek at stack = looking at runtime values
     let comptime_idx = jit.peek_at_stack(&asm.ctx, 0);
     let comptime_recv = jit.peek_at_stack(&asm.ctx, 1);
 
@@ -2960,6 +2962,78 @@ fn gen_opt_aref(
         // General case. Call the [] method.
         gen_opt_send_without_block(jit, asm, ocb)
     }
+}
+
+fn gen_opt_aref_with(
+    jit: &mut JITState,
+    asm: &mut Assembler,
+    _ocb: &mut OutlinedCb,
+) -> Option<CodegenStatus>{
+    jit_prepare_routine_call(jit, asm);
+    // println!("hi from gen_opt_aref_with\n");
+
+    // if !jit.at_current_insn() {
+    //     defer_compilation(jit, asm, ocb);
+    //     return Some(EndBlock);
+    // }
+
+    // // let comptime_recv = jit.peek_at_stack(&asm.ctx, 0);
+    // // let recv_opnd_val = asm.stack_pop(0);
+
+    // // let recv_opnd = asm.stack_opnd(0);
+    let key_opnd = Opnd::Value(jit.get_arg(0));
+
+    let recv_opnd = asm.stack_pop(1);
+
+    // // get_opnd_type will most likely return Type::Unknown
+    // // asking for what's known about the type at compile time that's guaranteed every time
+    // // good for skipping work if we know the value coming in is def something
+    // let recv_type = asm.ctx.get_opnd_type(StackOpnd(0));
+
+    // let recv_compare_by_id = asm.ccall(rb_hash_compare_by_id_p as *const u8, vec![recv_opnd]);
+    // if recv_opnd == Type::Hash
+    //     && assume_bop_not_redefined(jit, asm, ocb, HASH_REDEFINED_OP_FLAG, BOP_AREF)
+    //     && recv_compare_by_id == Opnd::Value(Qfalse)
+    //   {
+    //     let val = asm.ccall(rb_hash_aref as *const u8, vec![recv_opnd, key_opnd]);
+    //     let stack_ret = asm.stack_push(Type::Unknown);
+    //     asm.mov(stack_ret, val);
+    //     return Some(KeepCompiling);
+    // } else {
+    //    return None;
+    // }
+    // println!("recv_opnd: {:?}", { recv_opnd });
+    // println!("recv_opnd class: {:?}", { recv_opnd.class_of() });
+    // println!("comptime_recv: {:?}", { recv_opnd });
+    // println!("comptime_recv class: {:?}", { recv_opnd.class_of() });
+    // // println!("recv_opnd: {:?}", recv_opnd);
+    // println!("key_opnd: {:?}", key_opnd);
+
+    extern "C" {
+        fn rb_vm_opt_aref_with(recv: VALUE, key: VALUE) -> VALUE;
+    }
+
+    let val_opnd = asm.ccall(
+        rb_vm_opt_aref_with as *const u8,
+        vec![
+            recv_opnd,
+            key_opnd
+        ],
+    );
+
+    asm.cmp(val_opnd, Qundef.into());
+    asm.je(Target::side_exit(Counter::opt_mod_zero));
+
+    let top = asm.stack_push(Type::Unknown);
+    asm.mov(top, val_opnd);
+
+    // if (recv_opnd) {
+
+    // } else {
+    //     return None;
+    // }
+
+    return Some(KeepCompiling);
 }
 
 fn gen_opt_aset(
@@ -7933,6 +8007,7 @@ fn get_gen_fn(opcode: VALUE) -> Option<InsnGenFn> {
         YARVINSN_opt_neq => Some(gen_opt_neq),
         YARVINSN_opt_aref => Some(gen_opt_aref),
         YARVINSN_opt_aset => Some(gen_opt_aset),
+        YARVINSN_opt_aref_with => Some(gen_opt_aref_with),
         YARVINSN_opt_mult => Some(gen_opt_mult),
         YARVINSN_opt_div => Some(gen_opt_div),
         YARVINSN_opt_ltlt => Some(gen_opt_ltlt),
