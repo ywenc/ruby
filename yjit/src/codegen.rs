@@ -3022,7 +3022,7 @@ fn gen_opt_aref_with(
     );
 
     asm.cmp(val_opnd, Qundef.into());
-    asm.je(Target::side_exit(Counter::opt_mod_zero));
+    asm.je(Target::side_exit(Counter::opt_aref_with_qundef));
 
     let top = asm.stack_push(Type::Unknown);
     asm.mov(top, val_opnd);
