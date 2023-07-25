@@ -931,6 +931,25 @@ assert_equal 'special', %q{
   foo(special)
 }
 
+# test opt_aref_with with hash instantiated with proc 
+assert_equal "bar", %q{
+  h = Hash.new {"bar"}
+
+  h["foo"]
+  h["foo"]
+}
+
+# test opt_aref_with with hash that compares by id
+assert_equal "", %q{
+  h = Hash.new
+  h.compare_by_identity
+  h['foo'] = 'bar'
+  h['foo'] = 'baz'
+
+  h["foo"]
+  h["foo"]
+}
+
 # Test that object references in generated code get marked and moved
 assert_equal "good", %q{
   def bar
