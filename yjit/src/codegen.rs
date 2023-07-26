@@ -2970,44 +2970,10 @@ fn gen_opt_aref_with(
     _ocb: &mut OutlinedCb,
 ) -> Option<CodegenStatus>{
     jit_prepare_routine_call(jit, asm);
-    // println!("hi from gen_opt_aref_with\n");
-
-    // if !jit.at_current_insn() {
-    //     defer_compilation(jit, asm, ocb);
-    //     return Some(EndBlock);
-    // }
-
-    // // let comptime_recv = jit.peek_at_stack(&asm.ctx, 0);
-    // // let recv_opnd_val = asm.stack_pop(0);
-
-    // // let recv_opnd = asm.stack_opnd(0);
+ 
     let key_opnd = Opnd::Value(jit.get_arg(0));
 
     let recv_opnd = asm.stack_pop(1);
-
-    // // get_opnd_type will most likely return Type::Unknown
-    // // asking for what's known about the type at compile time that's guaranteed every time
-    // // good for skipping work if we know the value coming in is def something
-    // let recv_type = asm.ctx.get_opnd_type(StackOpnd(0));
-
-    // let recv_compare_by_id = asm.ccall(rb_hash_compare_by_id_p as *const u8, vec![recv_opnd]);
-    // if recv_opnd == Type::Hash
-    //     && assume_bop_not_redefined(jit, asm, ocb, HASH_REDEFINED_OP_FLAG, BOP_AREF)
-    //     && recv_compare_by_id == Opnd::Value(Qfalse)
-    //   {
-    //     let val = asm.ccall(rb_hash_aref as *const u8, vec![recv_opnd, key_opnd]);
-    //     let stack_ret = asm.stack_push(Type::Unknown);
-    //     asm.mov(stack_ret, val);
-    //     return Some(KeepCompiling);
-    // } else {
-    //    return None;
-    // }
-    // println!("recv_opnd: {:?}", { recv_opnd });
-    // println!("recv_opnd class: {:?}", { recv_opnd.class_of() });
-    // println!("comptime_recv: {:?}", { recv_opnd });
-    // println!("comptime_recv class: {:?}", { recv_opnd.class_of() });
-    // // println!("recv_opnd: {:?}", recv_opnd);
-    // println!("key_opnd: {:?}", key_opnd);
 
     extern "C" {
         fn rb_vm_opt_aref_with(recv: VALUE, key: VALUE) -> VALUE;
@@ -3026,12 +2992,6 @@ fn gen_opt_aref_with(
 
     let top = asm.stack_push(Type::Unknown);
     asm.mov(top, val_opnd);
-
-    // if (recv_opnd) {
-
-    // } else {
-    //     return None;
-    // }
 
     return Some(KeepCompiling);
 }
