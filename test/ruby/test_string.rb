@@ -1939,6 +1939,7 @@ CODE
     assert_not_send([S("hello"), :start_with?, S("el")])
     assert_send([S("hello"), :start_with?, S("el"), S("he")])
     assert_send([S("\xFF\xFE"), :start_with?, S("\xFF")])
+    assert_send([S("hello\xBE"), :start_with?, S("hello")])
     assert_not_send([S("\u{c4}"), :start_with?, S("\xC3")])
 
     bug5536 = '[ruby-core:40623]'
