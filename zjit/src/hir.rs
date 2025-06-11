@@ -419,6 +419,8 @@ pub enum Insn {
     IfFalse { val: InsnId, target: BranchEdge },
 
     /// Call a C function
+    /// `name` is for printing purposes only    
+    /// Call a C function
     /// `name` is for printing purposes only
     CCall { cfun: *const u8, args: Vec<InsnId>, name: ID, return_type: Type, elidable: bool },
 
@@ -1229,6 +1231,25 @@ impl Function {
                         self.try_rewrite_fixnum_op(block, insn_id, &|left, right| Insn::FixnumGt { left, right }, BOP_GT, self_val, args[0], state),
                     Insn::SendWithoutBlock { self_val, call_info: CallInfo { method_name }, args, state, .. } if method_name == ">=" && args.len() == 1 =>
                         self.try_rewrite_fixnum_op(block, insn_id, &|left, right| Insn::FixnumGe { left, right }, BOP_GE, self_val, args[0], state),
+                    Insn::SendWithoutBlock { self_val, call_info: CallInfo { method_name }, args, .. } if method_name == "to_s" && args.len() == 0 => {
+                        if self.is_a(self_val, types::StringExact) {
+                            self.make_equal_to(insn_id, self_val);
+                        } else if self.is_a(self_val, types::SymbolExact) {
+                            let cfun = rb_sym2str as *const u8; 
+                            // fun.push_insn(block, Insn::PatchPoint(Invariant::MethodRedefined { klass: types::SymbolExact, method: method_id }));
+                            // if let Some(guard_type) = guard_type {
+                            //     // Guard receiver class
+                            //     self_val = fun.push_insn(block, Insn::GuardType { val: self_val, guard_type, state });
+                            // }
+                            // let cfun = unsafe { get_mct_func(cfunc) }.cast();
+                            // let mut cfunc_args = vec![self_val];
+                            // cfunc_args.append(&mut args);
+                            let ccall = self.push_insn(block, Insn::CCall { cfun, args: args, name: method_id, return_type, elidable });
+                            // fun.make_equal_to(send_insn_id, ccall);
+                        } else {
+                            self.push_insn_id(block, insn_id);
+                        }
+                    }
                     Insn::SendWithoutBlock { mut self_val, call_info, cd, args, state } => {
                         let frame_state = self.frame_state(state);
                         let (klass, guard_equal_to) = if let Some(klass) = self.type_of(self_val).runtime_exact_ruby_class() {
@@ -1386,6 +1407,7 @@ impl Function {
             Err(())
         }
 
+        // reverse post order
         for block in self.rpo() {
             let old_insns = std::mem::take(&mut self.blocks[block.0].insns);
             assert!(self.blocks[block.0].insns.is_empty());
@@ -2481,6 +2503,43 @@ pub fn iseq_to_hir(iseq: *const rb_iseq_t) -> Result<Function, ParseError> {
                     let insn_id = fun.push_insn(block, Insn::NewRange { low, high, flag, state: exit_id });
                     state.stack_push(insn_id);
                 }
+                YARVINSN_objtostring => {
+                    let cd: *const rb_call_data = get_arg(pc, 0).as_ptr();
+                    let call_info = unsafe { rb_get_call_data_ci(cd) };
+                    
+                    if unknown_call_type(unsafe { rb_vm_ci_flag(call_info) }) {
+                        // Unknown call type; side-exit into the interpreter
+                        let exit_id = fun.push_insn(block, Insn::Snapshot { state: exit_state });
+                        fun.push_insn(block, Insn::SideExit { state: exit_id });
+                        break;  // End the block
+                    }
+                    let argc = unsafe { vm_ci_argc((*cd).ci) };
+                    assert_eq!(0, argc, "objtostring should not have args");
+                    let args = vec![];
+                    let method_name = unsafe {
+                        let mid = rb_vm_ci_mid(call_info);
+                        mid.contents_lossy().into_owned()
+                    };
+
+                    let exit_id = fun.push_insn(block, Insn::Snapshot { state: exit_state });
+                    let recv = state.stack_pop()?;
+                    let send = fun.push_insn(block, Insn::SendWithoutBlock { self_val: recv, call_info: CallInfo { method_name }, cd, args, state: exit_id });
+                    state.stack_push(send);
+                }
+                // YARVINSN_anytostring => {
+                //     let maybestring = state.stack_pop()?;
+                //     let val = state.stack_pop()?;
+                    
+                //     if self.is_a(maybestring, types::StringExact) {
+                //         let exit_id = fun.push_insn(block, Insn::Snapshot { state: exit_state });
+                //         state.stack_push(maybestring);
+                //     } else {
+                //         let exit_id = fun.push_insn(block, Insn::Snapshot { state: exit_state });
+                //         // coerce val to string using 
+                //         // let insn_id = fun.push_insn(block, Insn::ToString { val, state: exit_id });
+                //         state.stack_push(insn_id);
+                //     }
+                // }
                 _ => {
                     // Unknown opcode; side-exit into the interpreter
                     let exit_id = fun.push_insn(block, Insn::Snapshot { state: exit_state });

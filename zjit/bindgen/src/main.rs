@@ -226,6 +226,7 @@ fn main() {
         .allowlist_function("rb_intern2")
         .allowlist_function("rb_id2sym")
         .allowlist_function("rb_sym2id")
+        .allowlist_function("rb_sym2str")
         .allowlist_function("rb_str_intern")
         .allowlist_function("rb_id2str")
 
