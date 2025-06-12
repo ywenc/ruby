@@ -1005,7 +1005,10 @@ impl Function {
             FixnumGe { left, right } => FixnumGe { left: find!(*left), right: find!(*right) },
             FixnumLt { left, right } => FixnumLt { left: find!(*left), right: find!(*right) },
             FixnumLe { left, right } => FixnumLe { left: find!(*left), right: find!(*right) },
+<<<<<<< HEAD
             PutSpecialObject { value_type } => PutSpecialObject { value_type: *value_type },
+=======
+>>>>>>> ee2d083459 (ZJIT: objtostring to HIR)
             ObjToString { val, call_info, cd, state } => ObjToString {
                 val: find!(*val),
                 call_info: call_info.clone(),
@@ -5573,234 +5576,10 @@ mod opt_tests {
     }
 
     #[test]
-    fn test_elide_freeze_with_frozen_hash() {
-        eval("
-            def test = {}.freeze
-        ");
-        assert_optimized_method_hir("test",  expect![[r#"
-            fn test:
-            bb0(v0:BasicObject):
-              v3:HashExact[VALUE(0x1000)] = Const Value(VALUE(0x1000))
-              PatchPoint BOPRedefined(HASH_REDEFINED_OP_FLAG, BOP_FREEZE)
-              Return v3
-        "#]]);
-    }
-
-    #[test]
-    fn test_elide_freeze_with_refrozen_hash() {
-        eval("
-            def test = {}.freeze.freeze
-        ");
-        assert_optimized_method_hir("test",  expect![[r#"
-            fn test:
-            bb0(v0:BasicObject):
-              v3:HashExact[VALUE(0x1000)] = Const Value(VALUE(0x1000))
-              PatchPoint BOPRedefined(HASH_REDEFINED_OP_FLAG, BOP_FREEZE)
-              PatchPoint BOPRedefined(HASH_REDEFINED_OP_FLAG, BOP_FREEZE)
-              Return v3
-        "#]]);
-    }
-
-    #[test]
-    fn test_no_elide_freeze_with_unfrozen_hash() {
-        eval("
-            def test = {}.dup.freeze
-        ");
-        assert_optimized_method_hir("test",  expect![[r#"
-            fn test:
-            bb0(v0:BasicObject):
-              v3:HashExact = NewHash
-              v5:BasicObject = SendWithoutBlock v3, :dup
-              v7:BasicObject = SendWithoutBlock v5, :freeze
-              Return v7
-        "#]]);
-    }
-
-    #[test]
-    fn test_no_elide_freeze_hash_with_args() {
-        eval("
-            def test = {}.freeze(nil)
-        ");
-        assert_optimized_method_hir("test",  expect![[r#"
-            fn test:
-            bb0(v0:BasicObject):
-              v3:HashExact = NewHash
-              v4:NilClassExact = Const Value(nil)
-              v6:BasicObject = SendWithoutBlock v3, :freeze, v4
-              Return v6
-        "#]]);
-    }
-
-    #[test]
-    fn test_elide_freeze_with_frozen_ary() {
-        eval("
-            def test = [].freeze
-        ");
-        assert_optimized_method_hir("test",  expect![[r#"
-            fn test:
-            bb0(v0:BasicObject):
-              v3:ArrayExact[VALUE(0x1000)] = Const Value(VALUE(0x1000))
-              PatchPoint BOPRedefined(ARRAY_REDEFINED_OP_FLAG, BOP_FREEZE)
-              Return v3
-        "#]]);
-    }
-
-    #[test]
-    fn test_elide_freeze_with_refrozen_ary() {
-        eval("
-            def test = [].freeze.freeze
-        ");
-        assert_optimized_method_hir("test",  expect![[r#"
-            fn test:
-            bb0(v0:BasicObject):
-              v3:ArrayExact[VALUE(0x1000)] = Const Value(VALUE(0x1000))
-              PatchPoint BOPRedefined(ARRAY_REDEFINED_OP_FLAG, BOP_FREEZE)
-              PatchPoint BOPRedefined(ARRAY_REDEFINED_OP_FLAG, BOP_FREEZE)
-              Return v3
-        "#]]);
-    }
-
-    #[test]
-    fn test_no_elide_freeze_with_unfrozen_ary() {
-        eval("
-            def test = [].dup.freeze
-        ");
-        assert_optimized_method_hir("test",  expect![[r#"
-            fn test:
-            bb0(v0:BasicObject):
-              v3:ArrayExact = NewArray
-              v5:BasicObject = SendWithoutBlock v3, :dup
-              v7:BasicObject = SendWithoutBlock v5, :freeze
-              Return v7
-        "#]]);
-    }
-
-    #[test]
-    fn test_no_elide_freeze_ary_with_args() {
-        eval("
-            def test = [].freeze(nil)
-        ");
-        assert_optimized_method_hir("test",  expect![[r#"
-            fn test:
-            bb0(v0:BasicObject):
-              v3:ArrayExact = NewArray
-              v4:NilClassExact = Const Value(nil)
-              v6:BasicObject = SendWithoutBlock v3, :freeze, v4
-              Return v6
-        "#]]);
-    }
-
-    #[test]
-    fn test_elide_freeze_with_frozen_str() {
-        eval("
-            def test = ''.freeze
-        ");
-        assert_optimized_method_hir("test",  expect![[r#"
-            fn test:
-            bb0(v0:BasicObject):
-              v3:StringExact[VALUE(0x1000)] = Const Value(VALUE(0x1000))
-              PatchPoint BOPRedefined(STRING_REDEFINED_OP_FLAG, BOP_FREEZE)
-              Return v3
-        "#]]);
-    }
-
-    #[test]
-    fn test_elide_freeze_with_refrozen_str() {
-        eval("
-            def test = ''.freeze.freeze
-        ");
-        assert_optimized_method_hir("test",  expect![[r#"
-            fn test:
-            bb0(v0:BasicObject):
-              v3:StringExact[VALUE(0x1000)] = Const Value(VALUE(0x1000))
-              PatchPoint BOPRedefined(STRING_REDEFINED_OP_FLAG, BOP_FREEZE)
-              PatchPoint BOPRedefined(STRING_REDEFINED_OP_FLAG, BOP_FREEZE)
-              Return v3
-        "#]]);
-    }
-
-    #[test]
-    fn test_no_elide_freeze_with_unfrozen_str() {
-        eval("
-            def test = ''.dup.freeze
-        ");
-        assert_optimized_method_hir("test",  expect![[r#"
-            fn test:
-            bb0(v0:BasicObject):
-              v2:StringExact[VALUE(0x1000)] = Const Value(VALUE(0x1000))
-              v3:StringExact = StringCopy v2
-              v5:BasicObject = SendWithoutBlock v3, :dup
-              v7:BasicObject = SendWithoutBlock v5, :freeze
-              Return v7
-        "#]]);
-    }
-
-    #[test]
-    fn test_no_elide_freeze_str_with_args() {
-        eval("
-            def test = ''.freeze(nil)
-        ");
-        assert_optimized_method_hir("test",  expect![[r#"
-            fn test:
-            bb0(v0:BasicObject):
-              v2:StringExact[VALUE(0x1000)] = Const Value(VALUE(0x1000))
-              v3:StringExact = StringCopy v2
-              v4:NilClassExact = Const Value(nil)
-              v6:BasicObject = SendWithoutBlock v3, :freeze, v4
-              Return v6
-        "#]]);
-    }
-
-    #[test]
-    fn test_elide_uminus_with_frozen_str() {
-        eval("
-            def test = -''
-        ");
-        assert_optimized_method_hir("test",  expect![[r#"
-            fn test:
-            bb0(v0:BasicObject):
-              v3:StringExact[VALUE(0x1000)] = Const Value(VALUE(0x1000))
-              PatchPoint BOPRedefined(STRING_REDEFINED_OP_FLAG, BOP_UMINUS)
-              Return v3
-        "#]]);
-    }
-
-    #[test]
-    fn test_elide_uminus_with_refrozen_str() {
-        eval("
-            def test = -''.freeze
-        ");
-        assert_optimized_method_hir("test",  expect![[r#"
-            fn test:
-            bb0(v0:BasicObject):
-              v3:StringExact[VALUE(0x1000)] = Const Value(VALUE(0x1000))
-              PatchPoint BOPRedefined(STRING_REDEFINED_OP_FLAG, BOP_FREEZE)
-              PatchPoint BOPRedefined(STRING_REDEFINED_OP_FLAG, BOP_UMINUS)
-              Return v3
-        "#]]);
-    }
-
-    #[test]
-    fn test_no_elide_uminus_with_unfrozen_str() {
-        eval("
-            def test = -''.dup
-        ");
-        assert_optimized_method_hir("test",  expect![[r#"
-            fn test:
-            bb0(v0:BasicObject):
-              v2:StringExact[VALUE(0x1000)] = Const Value(VALUE(0x1000))
-              v3:StringExact = StringCopy v2
-              v5:BasicObject = SendWithoutBlock v3, :dup
-              v7:BasicObject = SendWithoutBlock v5, :-@
-              Return v7
-        "#]]);
-    }
-
-    #[test]
     fn test_objtostring_string() {
-        eval(r##"
-            def test = "#{('foo')}"
-        "##);
+        eval("
+            def test = \"#{('foo')}\"
+        ");
         assert_optimized_method_hir("test", expect![[r#"
             fn test:
             bb0(v0:BasicObject):
@@ -5812,10 +5591,10 @@ mod opt_tests {
     }
 
     #[test]
-    fn test_objtostring_with_non_string() {
-        eval(r##"
-            def test = "#{1}"
-        "##);
+    fn test_objtostring_fallback() {
+        eval("
+            def test = \"#{1}\"
+        ");
         assert_optimized_method_hir("test", expect![[r#"
             fn test:
             bb0(v0:BasicObject):
