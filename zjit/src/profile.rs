@@ -62,6 +62,7 @@ fn profile_insn(profiler: &mut Profiler, opcode: ruby_vminsn_type) {
         YARVINSN_opt_le    => profile_operands(profiler, 2),
         YARVINSN_opt_gt    => profile_operands(profiler, 2),
         YARVINSN_opt_ge    => profile_operands(profiler, 2),
+        YARVINSN_objtostring    => profile_operands(profiler, 1),
         YARVINSN_opt_send_without_block => {
             let cd: *const rb_call_data = profiler.insn_opnd(0).as_ptr();
             let argc = unsafe { vm_ci_argc((*cd).ci) };

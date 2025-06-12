@@ -444,6 +444,8 @@ pub enum Insn {
     FixnumGt   { left: InsnId, right: InsnId },
     FixnumGe   { left: InsnId, right: InsnId },
 
+    ObjToString { val: InsnId, call_info: CallInfo, cd: *const rb_call_data, state: InsnId },
+
     /// Side-exit if val doesn't have the expected type.
     GuardType { val: InsnId, guard_type: Type, state: InsnId },
     /// Side-exit if val is not the expected VALUE.
@@ -558,6 +560,7 @@ impl<'a> std::fmt::Display for InsnPrinter<'a> {
             Insn::ArrayDup { val, .. } => { write!(f, "ArrayDup {val}") }
             Insn::HashDup { val, .. } => { write!(f, "HashDup {val}") }
             Insn::StringCopy { val } => { write!(f, "StringCopy {val}") }
+            Insn::ObjToString { val, .. } => { write!(f, "ObjToString {val}") }
             Insn::Test { val } => { write!(f, "Test {val}") }
             Insn::IsNil { val } => { write!(f, "IsNil {val}") }
             Insn::Jump(target) => { write!(f, "Jump {target}") }
@@ -973,6 +976,12 @@ impl Function {
                 args: args.iter().map(|arg| find!(*arg)).collect(),
                 state: *state,
             },
+            ObjToString { val, call_info, cd, state } => ObjToString {
+                val: find!(*val),
+                call_info: call_info.clone(),
+                cd: *cd,
+                state: *state,
+            },
             ArraySet { array, idx, val } => ArraySet { array: find!(*array), idx: *idx, val: find!(*val) },
             ArrayDup { val , state } => ArrayDup { val: find!(*val), state: *state },
             &HashDup { val , state } => HashDup { val: find!(val), state },
@@ -1076,6 +1085,7 @@ impl Function {
             Insn::GetIvar { .. } => types::BasicObject,
             Insn::ToNewArray { .. } => types::ArrayExact,
             Insn::ToArray { .. } => types::ArrayExact,
+            Insn::ObjToString { .. } => types::BasicObject,
         }
     }
 
@@ -1156,7 +1166,11 @@ impl Function {
     /// with a GuardType or similar.
     fn profiled_type_of_at(&self, insn: InsnId, iseq_insn_idx: usize) -> Option<Type> {
         let Some(ref profiles) = self.profiles else { return None };
-        let Some(entries) = profiles.types.get(&iseq_insn_idx) else { return None };
+
+        let Some(entries) = profiles.types.get(&iseq_insn_idx) else { 
+            println!("are we here");
+            return None 
+        };
         for &(entry_insn, entry_type) in entries {
             if self.union_find.borrow().find_const(entry_insn) == self.union_find.borrow().find_const(insn) {
                 return Some(entry_type);
@@ -1282,6 +1296,20 @@ impl Function {
                         self.push_insn(block, Insn::PatchPoint(Invariant::StableConstantNames { idlist }));
                         let replacement = self.push_insn(block, Insn::Const { val: Const::Value(unsafe { (*ice).value }) });
                         self.make_equal_to(insn_id, replacement);
+                    }
+                    Insn::ObjToString { val, state, .. } => {
+                        let insn_idx = self.frame_state(state).insn_idx as usize;
+                        let actual_profiled_type = self.profiled_type_of_at(val, insn_idx);
+                        let unwrap_or_profiled_type = actual_profiled_type.unwrap_or(types::BasicObject);
+
+                        if self.is_a(val, types::StringExact) {
+                            self.make_equal_to(insn_id, val);
+                        } else if unwrap_or_profiled_type.is_subtype(types::StringExact) {
+                            self.push_insn(block, Insn::GuardType { val, guard_type: types::StringExact, state });
+                            self.make_equal_to(insn_id, val);
+                        } else {
+                            self.push_insn_id(block, insn_id);
+                        }
                     }
                     _ => { self.push_insn_id(block, insn_id); }
                 }
@@ -1643,6 +1671,10 @@ impl Function {
                 }
                 Insn::ArrayPush { array, val, state } => {
                     worklist.push_back(array);
+                    worklist.push_back(val);
+                    worklist.push_back(state);
+                }
+                Insn::ObjToString { val, state, .. } => {
                     worklist.push_back(val);
                     worklist.push_back(state);
                 }
@@ -2480,6 +2512,29 @@ pub fn iseq_to_hir(iseq: *const rb_iseq_t) -> Result<Function, ParseError> {
                     let exit_id = fun.push_insn(block, Insn::Snapshot { state: exit_state });
                     let insn_id = fun.push_insn(block, Insn::NewRange { low, high, flag, state: exit_id });
                     state.stack_push(insn_id);
+                }
+                YARVINSN_objtostring => {
+                    let cd: *const rb_call_data = get_arg(pc, 0).as_ptr();
+                    let call_info = unsafe { rb_get_call_data_ci(cd) };
+
+                    if unknown_call_type(unsafe { rb_vm_ci_flag(call_info) }) {
+                        // Unknown call type; side-exit into the interpreter
+                        let exit_id = fun.push_insn(block, Insn::Snapshot { state: exit_state });
+                        fun.push_insn(block, Insn::SideExit { state: exit_id });
+                        break;  // End the block
+                    }
+                    let argc = unsafe { vm_ci_argc((*cd).ci) };
+                    assert_eq!(0, argc, "objtostring should not have args");
+                    let method_name: String = unsafe {
+                        let mid = rb_vm_ci_mid(call_info);
+                        mid.contents_lossy().into_owned()
+                    };
+
+                    let exit_id = fun.push_insn(block, Insn::Snapshot { state: exit_state });
+                    let recv = state.stack_pop()?;
+
+                    let objtostring = fun.push_insn(block, Insn::ObjToString { val: recv, call_info: CallInfo { method_name }, cd, state: exit_id });
+                    state.stack_push(objtostring)
                 }
                 _ => {
                     // Unknown opcode; side-exit into the interpreter
