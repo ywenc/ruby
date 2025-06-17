@@ -494,6 +494,8 @@ pub enum Insn {
     FixnumGe   { left: InsnId, right: InsnId },
 
     ObjToString { val: InsnId, call_info: CallInfo, cd: *const rb_call_data, state: InsnId },
+    AnyToString { val: InsnId, str: InsnId, state: InsnId },
+    ConcatStrings { elements: Vec<InsnId>, state: InsnId },
 
     /// Side-exit if val doesn't have the expected type.
     GuardType { val: InsnId, guard_type: Type, state: InsnId },
@@ -688,6 +690,15 @@ impl<'a> std::fmt::Display for InsnPrinter<'a> {
             Insn::ArrayExtend { left, right, .. } => write!(f, "ArrayExtend {left}, {right}"),
             Insn::ArrayPush { array, val, .. } => write!(f, "ArrayPush {array}, {val}"),
             Insn::ObjToString { val, .. } => { write!(f, "ObjToString {val}") },
+            Insn::AnyToString { val, str, .. } => { write!(f, "AnyToString {val}, str: {str}") },
+            Insn::ConcatStrings { elements, .. } => {
+                let joined = elements.iter()
+                    .map(|e| e.to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                write!(f, "ConcatStrings {joined}")?;
+                Ok(())
+            },
             Insn::SideExit { .. } => write!(f, "SideExit"),
             Insn::PutSpecialObject { value_type } => {
                 write!(f, "PutSpecialObject {}", value_type)
@@ -1005,14 +1016,20 @@ impl Function {
             FixnumGe { left, right } => FixnumGe { left: find!(*left), right: find!(*right) },
             FixnumLt { left, right } => FixnumLt { left: find!(*left), right: find!(*right) },
             FixnumLe { left, right } => FixnumLe { left: find!(*left), right: find!(*right) },
-<<<<<<< HEAD
             PutSpecialObject { value_type } => PutSpecialObject { value_type: *value_type },
-=======
->>>>>>> ee2d083459 (ZJIT: objtostring to HIR)
             ObjToString { val, call_info, cd, state } => ObjToString {
                 val: find!(*val),
                 call_info: call_info.clone(),
                 cd: *cd,
+                state: *state,
+            },
+            AnyToString { val, str, state } => AnyToString {
+                val: find!(*val),
+                str: find!(*str),
+                state: *state,
+            },
+            ConcatStrings { elements, state } => ConcatStrings {
+                elements: elements.iter().map(|arg| find!(*arg)).collect(),
                 state: *state,
             },
             SendWithoutBlock { self_val, call_info, cd, args, state } => SendWithoutBlock {
@@ -1144,6 +1161,8 @@ impl Function {
             Insn::ToNewArray { .. } => types::ArrayExact,
             Insn::ToArray { .. } => types::ArrayExact,
             Insn::ObjToString { .. } => types::BasicObject,
+            Insn::AnyToString { .. } => types::StringExact,
+            Insn::ConcatStrings { .. } => types::StringExact,
         }
     }
 
@@ -1393,6 +1412,13 @@ impl Function {
                         } else {
                             let replacement = self.push_insn(block, Insn::SendWithoutBlock { self_val: val, call_info, cd, args: vec![], state });
                             self.make_equal_to(insn_id, replacement)
+                        }
+                    }
+                    Insn::AnyToString { str, .. } => {
+                        if self.is_a(str, types::StringExact) {
+                            self.make_equal_to(insn_id, str);
+                        } else {
+                            self.push_insn_id(block, insn_id); 
                         }
                     }
                     _ => { self.push_insn_id(block, insn_id); }
@@ -1765,6 +1791,15 @@ impl Function {
                 }
                 Insn::ObjToString { val, state, .. } => {
                     worklist.push_back(val);
+                    worklist.push_back(state);
+                }
+                Insn::AnyToString { val, str, state, .. } => {
+                    worklist.push_back(val);
+                    worklist.push_back(str);
+                    worklist.push_back(state);
+                }
+                Insn::ConcatStrings { elements, state, .. } => {
+                    worklist.extend(elements);
                     worklist.push_back(state);
                 }
                 Insn::GetGlobal { state, .. } |
@@ -2658,6 +2693,39 @@ pub fn iseq_to_hir(iseq: *const rb_iseq_t) -> Result<Function, ParseError> {
                     let exit_id = fun.push_insn(block, Insn::Snapshot { state: exit_state });
                     let objtostring = fun.push_insn(block, Insn::ObjToString { val: recv, call_info: CallInfo { method_name }, cd, state: exit_id });
                     state.stack_push(objtostring)
+                }
+                YARVINSN_anytostring => {
+                    let str = state.stack_pop()?;
+                    let val = state.stack_pop()?;
+
+                    let exit_id = fun.push_insn(block, Insn::Snapshot { state: exit_state });
+                    let anytostring = fun.push_insn(block, Insn::AnyToString { val, str, state: exit_id });
+                    state.stack_push(anytostring);
+                }
+                YARVINSN_concatstrings => {
+                    let num = get_arg(pc, 0).as_usize();
+                    assert!(num > 1, "concatstrings expects more than 1 string on the stack");
+
+                    // let mut elements = vec![];
+                    // for _ in 0..num {
+                    //     let str = state.stack_pop()?;
+                    //     elements.push(str);
+                    // }
+
+                    // elements.reverse();
+
+                //     let mut result = String::new();
+                //     for insn_id in &elements {
+                //         let Insn::Const { val: Const::Value(val) } = fun.find(insn_id);
+                //         result.push_str(&val.to_rust_string());
+                //         // if let Insn::Const { val: Const::Value(val) } = fun.find(id) {
+                //             // result.push_str(&val.to_rust_string());
+                //         // }                    
+                //     }
+
+                    let exit_id = fun.push_insn(block, Insn::Snapshot { state: exit_state });
+                    let insn_id = fun.push_insn(block, Insn::ConcatStrings { mum, state: exit_id });
+                    state.stack_push(insn_id);
                 }
                 _ => {
                     // Unknown opcode; side-exit into the interpreter

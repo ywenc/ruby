@@ -282,6 +282,8 @@ fn gen_insn(cb: &mut CodeBlock, jit: &mut JITState, asm: &mut Assembler, functio
         Insn::SetIvar { self_val, id, val, state: _ } => return gen_setivar(asm, opnd!(self_val), *id, opnd!(val)),
         Insn::SideExit { state } => return gen_side_exit(jit, asm, &function.frame_state(*state)),
         Insn::PutSpecialObject { value_type } => gen_putspecialobject(asm, *value_type),
+        Insn::AnyToString { val, str, state } => gen_anytostring(asm, opnd!(val), opnd!(str), &function.frame_state(*state))?,
+        Insn::ConcatStrings { elements, state } => gen_concatstrings(jit, asm, elements, &function.frame_state(*state))?,
         _ => {
             debug!("ZJIT: gen_function: unexpected insn {:?}", insn);
             return None;
@@ -794,6 +796,48 @@ fn gen_fixnum_gt(asm: &mut Assembler, left: lir::Opnd, right: lir::Opnd) -> Opti
 fn gen_fixnum_ge(asm: &mut Assembler, left: lir::Opnd, right: lir::Opnd) -> Option<lir::Opnd> {
     asm.cmp(left, right);
     Some(asm.csel_ge(Qtrue.into(), Qfalse.into()))
+}
+
+fn gen_anytostring(asm: &mut Assembler, val: lir::Opnd, str: lir::Opnd, state: &FrameState) -> Option<lir::Opnd> {
+    asm_comment!(asm, "call rb_obj_as_string_result");
+
+    // Save PC
+    gen_save_pc(asm, state);
+
+    Some(asm.ccall(
+        rb_obj_as_string_result as *const u8,
+        vec![str, val],
+    ))
+}
+ 
+fn gen_concatstrings(
+    jit: &mut JITState,
+    asm: &mut Assembler, 
+    elements: &Vec<InsnId>, 
+    state: &FrameState
+) -> Option<lir::Opnd> {
+    asm_comment!(asm, "call rb_str_concat_literals");
+
+    // let mut strary = Vec::with_capacity(elements.len());
+    // for &el in elements {
+    //     strary.push(jit.get_opnd(el)?);
+    // }
+    // let values_ptr = asm.lea(asm.ctx.sp_opnd(-(num as i32)));
+
+    let num = Opnd::UImm(elements.len() as u64);
+
+    let offset = (state.stack().len() + elements.len()) as i32 * SIZEOF_VALUE_I32;
+    let sp_addr = asm.lea(Opnd::mem(64, SP, offset));
+
+    let operands = vec![num, sp_addr];
+
+    // Save PC
+    gen_save_pc(asm, state);
+
+    Some(asm.ccall(
+        rb_str_concat_literals as *const u8,
+        operands,
+    ))
 }
 
 /// Evaluate if a value is truthy
