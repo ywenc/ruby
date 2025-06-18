@@ -495,7 +495,7 @@ pub enum Insn {
 
     ObjToString { val: InsnId, call_info: CallInfo, cd: *const rb_call_data, state: InsnId },
     AnyToString { val: InsnId, str: InsnId, state: InsnId },
-    ConcatStrings { elements: Vec<InsnId>, state: InsnId },
+    ConcatStrings { num: usize, state: InsnId },
 
     /// Side-exit if val doesn't have the expected type.
     GuardType { val: InsnId, guard_type: Type, state: InsnId },
@@ -691,14 +691,7 @@ impl<'a> std::fmt::Display for InsnPrinter<'a> {
             Insn::ArrayPush { array, val, .. } => write!(f, "ArrayPush {array}, {val}"),
             Insn::ObjToString { val, .. } => { write!(f, "ObjToString {val}") },
             Insn::AnyToString { val, str, .. } => { write!(f, "AnyToString {val}, str: {str}") },
-            Insn::ConcatStrings { elements, .. } => {
-                let joined = elements.iter()
-                    .map(|e| e.to_string())
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                write!(f, "ConcatStrings {joined}")?;
-                Ok(())
-            },
+            Insn::ConcatStrings { num, .. } => { write!(f, "ConcatStrings with {num} values") },
             Insn::SideExit { .. } => write!(f, "SideExit"),
             Insn::PutSpecialObject { value_type } => {
                 write!(f, "PutSpecialObject {}", value_type)
@@ -1028,8 +1021,8 @@ impl Function {
                 str: find!(*str),
                 state: *state,
             },
-            ConcatStrings { elements, state } => ConcatStrings {
-                elements: elements.iter().map(|arg| find!(*arg)).collect(),
+            ConcatStrings { num, state } => ConcatStrings {
+                num: *num,
                 state: *state,
             },
             SendWithoutBlock { self_val, call_info, cd, args, state } => SendWithoutBlock {
@@ -1798,8 +1791,7 @@ impl Function {
                     worklist.push_back(str);
                     worklist.push_back(state);
                 }
-                Insn::ConcatStrings { elements, state, .. } => {
-                    worklist.extend(elements);
+                Insn::ConcatStrings { state, .. } => {
                     worklist.push_back(state);
                 }
                 Insn::GetGlobal { state, .. } |
@@ -2724,7 +2716,7 @@ pub fn iseq_to_hir(iseq: *const rb_iseq_t) -> Result<Function, ParseError> {
                 //     }
 
                     let exit_id = fun.push_insn(block, Insn::Snapshot { state: exit_state });
-                    let insn_id = fun.push_insn(block, Insn::ConcatStrings { mum, state: exit_id });
+                    let insn_id = fun.push_insn(block, Insn::ConcatStrings { num, state: exit_id });
                     state.stack_push(insn_id);
                 }
                 _ => {

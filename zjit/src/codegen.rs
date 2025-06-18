@@ -283,7 +283,7 @@ fn gen_insn(cb: &mut CodeBlock, jit: &mut JITState, asm: &mut Assembler, functio
         Insn::SideExit { state } => return gen_side_exit(jit, asm, &function.frame_state(*state)),
         Insn::PutSpecialObject { value_type } => gen_putspecialobject(asm, *value_type),
         Insn::AnyToString { val, str, state } => gen_anytostring(asm, opnd!(val), opnd!(str), &function.frame_state(*state))?,
-        Insn::ConcatStrings { elements, state } => gen_concatstrings(jit, asm, elements, &function.frame_state(*state))?,
+        Insn::ConcatStrings { num, state } => gen_concatstrings(asm, *num, &function.frame_state(*state))?,
         _ => {
             debug!("ZJIT: gen_function: unexpected insn {:?}", insn);
             return None;
@@ -811,33 +811,31 @@ fn gen_anytostring(asm: &mut Assembler, val: lir::Opnd, str: lir::Opnd, state: &
 }
  
 fn gen_concatstrings(
-    jit: &mut JITState,
     asm: &mut Assembler, 
-    elements: &Vec<InsnId>, 
+    num: usize,
     state: &FrameState
-) -> Option<lir::Opnd> {
+) -> Option<(lir::Opnd)> {
     asm_comment!(asm, "call rb_str_concat_literals");
 
-    // let mut strary = Vec::with_capacity(elements.len());
-    // for &el in elements {
-    //     strary.push(jit.get_opnd(el)?);
-    // }
-    // let values_ptr = asm.lea(asm.ctx.sp_opnd(-(num as i32)));
+    let disp = num as i32 * SIZEOF_VALUE_I32 as i32;
+    // asm_comment!(asm, "find lea");
+    let sp_addr = asm.lea(Opnd::mem(64, SP, disp));
+    // asm_comment!(asm, "find lea end");
 
-    let num = Opnd::UImm(elements.len() as u64);
-
-    let offset = (state.stack().len() + elements.len()) as i32 * SIZEOF_VALUE_I32;
-    let sp_addr = asm.lea(Opnd::mem(64, SP, offset));
-
-    let operands = vec![num, sp_addr];
+    let operands = vec![Opnd::UImm(num as u64), sp_addr];
 
     // Save PC
     gen_save_pc(asm, state);
 
-    Some(asm.ccall(
+    let result = asm.ccall(
         rb_str_concat_literals as *const u8,
         operands,
-    ))
+    );
+
+    // println!("  gen_concatstrings: result = {:?}", result);
+
+    Some(result)
+    // Some(())
 }
 
 /// Evaluate if a value is truthy
