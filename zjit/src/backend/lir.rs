@@ -17,6 +17,7 @@ pub const SP: Opnd = _SP;
 pub const C_ARG_OPNDS: [Opnd; 6] = _C_ARG_OPNDS;
 pub const C_RET_OPND: Opnd = _C_RET_OPND;
 pub use crate::backend::current::{Reg, C_RET_REG};
+pub const NATIVE_STACK_PTR: Opnd = _NATIVE_STACK_PTR;
 
 // Memory operand base
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]

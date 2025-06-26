@@ -6,7 +6,7 @@ use crate::profile::get_or_create_iseq_payload;
 use crate::state::ZJITState;
 use crate::{asm::CodeBlock, cruby::*, options::debug, virtualmem::CodePtr};
 use crate::invariants::{iseq_escapes_ep, track_no_ep_escape_assumption};
-use crate::backend::lir::{self, asm_comment, Assembler, Opnd, Target, CFP, C_ARG_OPNDS, C_RET_OPND, EC, SP};
+use crate::backend::lir::{self, asm_comment, Assembler, Opnd, Target, CFP, C_ARG_OPNDS, C_RET_OPND, EC, SP, NATIVE_STACK_PTR};
 use crate::hir::{iseq_to_hir, Block, BlockId, BranchEdge, CallInfo, RangeType, SELF_PARAM_IDX, SpecialObjectType};
 use crate::hir::{Const, FrameState, Function, Insn, InsnId};
 use crate::hir_type::{types::Fixnum, Type};
@@ -284,6 +284,7 @@ fn gen_insn(cb: &mut CodeBlock, jit: &mut JITState, asm: &mut Assembler, functio
         Insn::SideExit { state } => return gen_side_exit(jit, asm, &function.frame_state(*state)),
         Insn::PutSpecialObject { value_type } => gen_putspecialobject(asm, *value_type),
         Insn::AnyToString { val, str, state } => gen_anytostring(asm, opnd!(val), opnd!(str), &function.frame_state(*state))?,
+        Insn::ConcatStrings { strary, state } => gen_concatstrings(jit, asm, strary, &function.frame_state(*state))?,
         _ => {
             debug!("ZJIT: gen_function: unexpected insn {:?}", insn);
             return None;
@@ -828,6 +829,54 @@ fn gen_anytostring(asm: &mut Assembler, val: lir::Opnd, str: lir::Opnd, state: &
         rb_obj_as_string_result as *const u8,
         vec![str, val],
     ))
+}
+
+fn gen_concatstrings(
+    jit: &mut JITState, 
+    asm: &mut Assembler, 
+    strary: &Vec<InsnId>, 
+    state: &FrameState
+) -> Option<lir::Opnd> {
+    asm_comment!(asm, "make stack-allocated array of {} strs", strary.len());
+    for &insn_id in strary.iter() {
+        asm.cpush(jit.get_opnd(insn_id)?);
+    }
+
+    asm.mov(Opnd::mem(64, SP, 0), Opnd::Imm(strary.len().try_into().unwrap()));
+
+    // // // Save PC
+    // gen_save_pc(asm, state);
+
+    #[unsafe(no_mangle)]
+    pub extern "C" fn print_value_fn(val: VALUE) {
+        unsafe { rb_obj_info_dump(val) }
+    }
+
+    for i in -1..0 {
+        let disp = i * SIZEOF_VALUE_I32;
+        let sp = asm.lea(Opnd::mem(64, SP, disp));
+        let op = asm.load(Opnd::mem(64, sp, 0));
+
+        asm.ccall(print_value_fn as *const u8, vec![op]);
+    }
+
+    // asm_comment!(asm, "get stack pointer");
+    // let sp = asm.lea(Opnd::mem(VALUE_BITS, NATIVE_STACK_PTR, 0));
+
+    // println!("ZJIT: gen_concatstrings: sp = {sp:?}");
+
+    // asm_comment!(asm, "call rb_str_concat_literal with {} strs", strary.len());
+    // let _ = asm.ccall(
+    //     rb_str_concat_literals as *const u8,
+    //     vec![Opnd::UImm(strary.len().try_into().unwrap()), sp],
+    // );
+
+    // asm_comment!(asm, "clear stack-allocated array of {} args", strary.len());
+    // let new_sp = asm.add(NATIVE_STACK_PTR, (strary.len()*SIZEOF_VALUE).into());
+    // asm.mov(NATIVE_STACK_PTR, sp);
+    // asm.mov(NATIVE_STACK_PTR, new_sp);
+
+    Some(asm.add(Opnd::Imm(1), Opnd::Imm(1)))
 }
 
 /// Evaluate if a value is truthy

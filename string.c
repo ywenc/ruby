@@ -2174,6 +2174,7 @@ rb_obj_as_string(VALUE obj)
 VALUE
 rb_obj_as_string_result(VALUE str, VALUE obj)
 {
+    fprintf(stderr, "stuff: %p (is str: %d) %p\n", str, RB_TYPE_P(str, T_STRING), obj);
     if (!RB_TYPE_P(str, T_STRING))
         return rb_any_to_s(obj);
     return str;

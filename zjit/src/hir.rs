@@ -499,6 +499,7 @@ pub enum Insn {
     // Distinct from `SendWithoutBlock` with `mid:to_s` because does not have a patch point for String to_s being redefined
     ObjToString { val: InsnId, call_info: CallInfo, cd: *const rb_call_data, state: InsnId },
     AnyToString { val: InsnId, str: InsnId, state: InsnId },
+    ConcatStrings { strary: Vec<InsnId>, state: InsnId },
 
     /// Side-exit if val doesn't have the expected type.
     GuardType { val: InsnId, guard_type: Type, state: InsnId },
@@ -701,6 +702,14 @@ impl<'a> std::fmt::Display for InsnPrinter<'a> {
             Insn::ArrayPush { array, val, .. } => write!(f, "ArrayPush {array}, {val}"),
             Insn::ObjToString { val, .. } => { write!(f, "ObjToString {val}") },
             Insn::AnyToString { val, str, .. } => { write!(f, "AnyToString {val}, str: {str}") },
+            Insn::ConcatStrings { strary, .. } => { 
+                let straryout = strary.iter()
+                    .map(|id| format!("{id}"))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                write!(f, "ConcatStrings {straryout}")?;
+                Ok(())
+            },
             Insn::SideExit { .. } => write!(f, "SideExit"),
             Insn::PutSpecialObject { value_type } => {
                 write!(f, "PutSpecialObject {}", value_type)
@@ -1030,6 +1039,10 @@ impl Function {
                 str: find!(*str),
                 state: *state,
             },
+            ConcatStrings { strary, state } => ConcatStrings {
+                strary: strary.iter().map(|v| find!(*v)).collect(),
+                state: *state,
+            },
             SendWithoutBlock { self_val, call_info, cd, args, state } => SendWithoutBlock {
                 self_val: find!(*self_val),
                 call_info: call_info.clone(),
@@ -1162,6 +1175,7 @@ impl Function {
             Insn::ToArray { .. } => types::ArrayExact,
             Insn::ObjToString { .. } => types::BasicObject,
             Insn::AnyToString { .. } => types::StringExact,
+            Insn::ConcatStrings { .. } => types::StringExact,
         }
     }
 
@@ -1800,6 +1814,10 @@ impl Function {
                 Insn::AnyToString { val, str, state, .. } => {
                     worklist.push_back(val);
                     worklist.push_back(str);
+                    worklist.push_back(state);
+                }
+                Insn::ConcatStrings { strary, state, .. } => {
+                    worklist.extend(strary);
                     worklist.push_back(state);
                 }
                 Insn::GetGlobal { state, .. } |
@@ -2748,6 +2766,22 @@ pub fn iseq_to_hir(iseq: *const rb_iseq_t) -> Result<Function, ParseError> {
                     let exit_id = fun.push_insn(block, Insn::Snapshot { state: exit_state });
                     let anytostring = fun.push_insn(block, Insn::AnyToString { val, str, state: exit_id });
                     state.stack_push(anytostring);
+                }
+                YARVINSN_concatstrings => {
+                    let num = get_arg(pc, 0).as_usize();
+                    assert!(num > 1, "concatstrings expects more than 1 string on the stack");
+
+                    let mut strary = vec![];
+                    for _ in 0..num {
+                        let str = state.stack_pop()?;
+                        strary.push(str);
+                    }
+
+                    // elements.reverse();
+
+                    let exit_id = fun.push_insn(block, Insn::Snapshot { state: exit_state });
+                    let insn_id = fun.push_insn(block, Insn::ConcatStrings { strary, state: exit_id });
+                    state.stack_push(insn_id);
                 }
                 _ => {
                     // Unknown opcode; side-exit into the interpreter
