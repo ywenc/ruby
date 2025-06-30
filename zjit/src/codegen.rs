@@ -282,6 +282,7 @@ fn gen_insn(cb: &mut CodeBlock, jit: &mut JITState, asm: &mut Assembler, functio
         Insn::GetConstantPath { ic, state } => gen_get_constant_path(asm, *ic, &function.frame_state(*state)),
         Insn::SetIvar { self_val, id, val, state: _ } => return gen_setivar(asm, opnd!(self_val), *id, opnd!(val)),
         Insn::SideExit { state } => return gen_side_exit(jit, asm, &function.frame_state(*state)),
+        Insn::CheckType { val, type_val } => return gen_checktype(asm, opnd!(val), *type_val)?,
         Insn::PutSpecialObject { value_type } => gen_putspecialobject(asm, *value_type),
         Insn::AnyToString { val, str, state } => gen_anytostring(asm, opnd!(val), opnd!(str), &function.frame_state(*state))?,
         _ => {
@@ -535,6 +536,22 @@ fn gen_if_false(jit: &mut JITState, asm: &mut Assembler, val: lir::Opnd, branch:
     asm.write_label(if_true);
 
     Some(())
+}
+
+fn gen_checktype(
+    asm: &mut Assembler,
+    val: lir::Opnd,
+    type_val: rb_num_t,
+) ->Option<lir::Opnd> {
+    let val = asm.load(val);
+    let object_type = asm.and(
+        Opnd::mem(64, val, RUBY_OFFSET_RBASIC_FLAGS),
+        Opnd::UImm(RUBY_T_MASK.into()));
+
+
+        //short circuit special consts
+    asm.cmp(object_type, Opnd::UImm(type_val));
+    Some(asm.csel_e(Qtrue.into(), Qfalse.into()))
 }
 
 /// Compile a dynamic dispatch without block

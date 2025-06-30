@@ -1,5 +1,5 @@
 #![allow(non_upper_case_globals)]
-use crate::cruby::{Qfalse, Qnil, Qtrue, VALUE, RUBY_T_ARRAY, RUBY_T_STRING, RUBY_T_HASH};
+use crate::cruby::{ruby_value_type, Qfalse, Qnil, Qtrue, RUBY_T_ARRAY, RUBY_T_HASH, RUBY_T_STRING, VALUE};
 use crate::cruby::{rb_cInteger, rb_cFloat, rb_cArray, rb_cHash, rb_cString, rb_cSymbol, rb_cObject, rb_cTrueClass, rb_cFalseClass, rb_cNilClass, rb_cRange};
 use crate::cruby::ClassRelationship;
 use crate::cruby::get_class_name;
@@ -396,7 +396,15 @@ impl Type {
         if self.is_subtype(types::SymbolExact) { return Some(unsafe { rb_cSymbol }); }
         if self.is_subtype(types::TrueClassExact) { return Some(unsafe { rb_cTrueClass }); }
         None
-    }
+    }    
+
+    /// Returns an Option with the T_ value type if it is known, otherwise None
+    pub fn known_value_type(&self) -> Option<ruby_value_type> {
+        if self.is_subtype(types::Array) { return Some(RUBY_T_ARRAY); }
+        if self.is_subtype(types::String) { return Some(RUBY_T_STRING); }
+        if self.is_subtype(types::Hash) { return Some(RUBY_T_STRING); }
+        None
+    }    
 
     /// Check bit equality of two `Type`s. Do not use! You are probably looking for [`Type::is_subtype`].
     pub fn bit_equal(&self, other: Type) -> bool {

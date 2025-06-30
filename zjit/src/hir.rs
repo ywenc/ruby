@@ -500,6 +500,8 @@ pub enum Insn {
     ObjToString { val: InsnId, call_info: CallInfo, cd: *const rb_call_data, state: InsnId },
     AnyToString { val: InsnId, str: InsnId, state: InsnId },
 
+    CheckType { val: InsnId, type_val: ruby_value_type },
+
     /// Side-exit if val doesn't have the expected type.
     GuardType { val: InsnId, guard_type: Type, state: InsnId },
     /// Side-exit if val is not the expected VALUE.
@@ -701,6 +703,17 @@ impl<'a> std::fmt::Display for InsnPrinter<'a> {
             Insn::ArrayPush { array, val, .. } => write!(f, "ArrayPush {array}, {val}"),
             Insn::ObjToString { val, .. } => { write!(f, "ObjToString {val}") },
             Insn::AnyToString { val, str, .. } => { write!(f, "AnyToString {val}, str: {str}") },
+            Insn::CheckType { val, type_val, .. } => {
+                use std::borrow::Cow;
+                let type_val_display = match *type_val {
+                    RUBY_T_STRING => Cow::Borrowed("T_STRING"),
+                    RUBY_T_ARRAY => Cow::Borrowed("T_ARRAY"),
+                    RUBY_T_HASH => Cow::Borrowed("T_HASH"),
+                    _ => Cow::Borrowed("INVALID_TYPE"),
+                };
+
+                write!(f, "CheckType {type_val_display}, val: {val}") 
+            },
             Insn::SideExit { .. } => write!(f, "SideExit"),
             Insn::PutSpecialObject { value_type } => {
                 write!(f, "PutSpecialObject {}", value_type)
@@ -1030,6 +1043,7 @@ impl Function {
                 str: find!(*str),
                 state: *state,
             },
+            CheckType { val, type_val } => CheckType { val: find!(*val), type_val: *type_val },
             SendWithoutBlock { self_val, call_info, cd, args, state } => SendWithoutBlock {
                 self_val: find!(*self_val),
                 call_info: call_info.clone(),
@@ -1160,6 +1174,7 @@ impl Function {
             Insn::GetIvar { .. } => types::BasicObject,
             Insn::ToNewArray { .. } => types::ArrayExact,
             Insn::ToArray { .. } => types::ArrayExact,
+            Insn::CheckType { .. } => types::BoolExact,
             Insn::ObjToString { .. } => types::BasicObject,
             Insn::AnyToString { .. } => types::String,
         }
@@ -1419,6 +1434,21 @@ impl Function {
                             self.make_equal_to(insn_id, str);
                         } else {
                             self.push_insn_id(block, insn_id); 
+                        }
+                    }
+                    Insn::CheckType { val, type_val } => {
+                        let val_type = self.type_of(val);
+                        match val_type.known_value_type() {
+                            Some(known_val_type) => {
+                                if known_val_type == type_val {
+                                    let replacement = self.push_insn(block, Insn::Const { val: Const::CBool(true) });
+                                    self.make_equal_to(insn_id, replacement);
+                                } else {
+                                    let replacement = self.push_insn(block, Insn::Const { val: Const::CBool(false) });
+                                    self.make_equal_to(insn_id, replacement);
+                                }
+                            },
+                            _ => { self.push_insn_id(block, insn_id); }
                         }
                     }
                     _ => { self.push_insn_id(block, insn_id); }
@@ -1801,6 +1831,9 @@ impl Function {
                     worklist.push_back(val);
                     worklist.push_back(str);
                     worklist.push_back(state);
+                }
+                Insn::CheckType { val, ..} => {
+                    worklist.push_back(val);
                 }
                 Insn::GetGlobal { state, .. } |
                 Insn::SideExit { state } => worklist.push_back(state),
@@ -2781,6 +2814,14 @@ pub fn iseq_to_hir(iseq: *const rb_iseq_t) -> Result<Function, ParseError> {
 
                     let exit_id = fun.push_insn(block, Insn::Snapshot { state: exit_state });
                     let insn_id = fun.push_insn(block, Insn::InvokeBuiltin { bf, args, state: exit_id });
+                    state.stack_push(insn_id);
+                }
+                YARVINSN_checktype => {
+                    let type_val = get_arg(pc, 0).as_u32();
+                    assert!(type_val == RUBY_T_HASH || type_val == RUBY_T_ARRAY || type_val == RUBY_T_STRING,
+                        "checktype expects only String, Hash, Array, got: {type_val}");
+                    let val = state.stack_pop()?;
+                    let insn_id = fun.push_insn(block, Insn::CheckType { val, type_val });
                     state.stack_push(insn_id);
                 }
                 YARVINSN_objtostring => {
@@ -4476,6 +4517,20 @@ mod tests {
               Return v10
             bb1(v14:BasicObject, v15:BasicObject, v16:NilClassExact, v17:BasicObject, v18:Fixnum[0], v19:Fixnum[1], v20:BasicObject):
               Return v20
+        "#]]);
+    }
+
+    #[test]
+    fn test_checktype_array() {
+        eval("[] in []");
+        assert_method_hir_with_opcode("test", YARVINSN_checktype, expect![[r#"
+            fn test:
+            bb0(v0:BasicObject):
+            v2:StringExact[VALUE(0x1000)] = Const Value(VALUE(0x1000))
+            v3:Fixnum[1] = Const Value(1)
+            v5:BasicObject = ObjToString v3
+            v7:String = AnyToString v3, str: v5
+            SideExit
         "#]]);
     }
 
